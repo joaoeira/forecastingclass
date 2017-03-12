@@ -1,0 +1,373 @@
+---
+title: "Forecasting 2016/2017 - Problem Set 1"
+author: João Eira, Paola Di Nunzio, Esteban Miguélez
+date: "March 2017"
+output: pdf_document
+---
+
+```{r, include=FALSE}
+library(forecast)
+library(ggfortify)
+library(ggplot2)
+library(tseries)
+library(knitr)
+```
+The purpose of this report is to use the forecasting methods taught in class using time series data of Portugal's index of output prices, which was retrived from Instituto Nacional de Estatistica, to forecast likely future values of the index for the months of February, March, and April.
+```{r, include=FALSE}
+data <- as.data.frame(read.csv(file="1.csv"))
+indice <- ts(rev(data[[3]]), start=c(2010,1),frequency=12)
+```
+#Exploratory graphical analysis
+
+In this first section we'll plot the available data in a variety of manners to try to understand what the data is telling us before proceeding to use any forecast method.
+
+```{r, echo=FALSE}
+autoplot(indice, xlab="Period",ylab="Index", main="Index of Output Prices 2010-2017")
+```
+
+A cursory analysis of the plot above gives us indication of a structural shift happening around the middle of 2012 which inverted a previous upward trend. This new downward trend seems to have persisted until the first months of 2016 and it now seems to be trending upwards, though it is still unclear whether this apparent upward trend will be sustained. 
+
+Decomposing the original time series into a trend and seasonal components allows us to better peer into its innards. 
+
+```{r, echo=FALSE}
+autoplot(stl(indice, s.window = 'periodic'), main="Time Series Decomposition")
+```
+
+As noticed before, there is a shift in the direction of the trend component around 2012. The upwards trend starting in 2016 noticed before does seem to be due to a change in the underlying trend of the series and not noise. Furthermore, the plot of the seasonal component provides evidence for seasonal variation in this time series, but of diminute importance when compared to the trend component. The time series also does not seem to have multiplicative seasonality.
+
+```{r, echo=FALSE}
+ggfreqplot(indice, main="Monthly Visualization of Time Series Data")
+```
+
+A plot of the yearly values for each month doesn't seem to provide more information about the time series than the decomposition above. Again there's an inflection point in 2012, and a seemingly change upwards starting in 2016, plus a seasonal component that is not much noticeable.
+
+#Forecasts
+
+##Simple forecast methods
+
+We'll start our use of the forecast methods introduced in class by trying out the simplest methods available: Mean, Naive, Naive Seasonal, and Drift. 
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+indice %>% meanf %>% forecast(h=3) -> mean_f
+autoplot(indice, series="Data", main = "Mean Method") + 
+  autolayer(mean_f, series="Forecast") + 
+  autolayer(fitted(mean_f), series="Fitted")
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+indice %>% naive %>% forecast(h=5) -> naivef
+autoplot(indice, series="Data", main = "Naive Method") + 
+  autolayer(naivef, series="Forecast") + 
+  autolayer(fitted(naivef), series="Fitted")
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+indice %>% snaive %>% forecast(h=3) -> snaivef
+autoplot(indice, series="Data", main = "Seasonal Naive Method") + 
+  autolayer(snaivef, series="Forecast") + 
+  autolayer(fitted(snaivef), series="Fitted")
+```
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+indice %>% rwf(drift=TRUE) %>% forecast(h=3) -> driftf
+autoplot(indice, series="Data", main= "Random Walk with Drift Method") + 
+  autolayer(driftf, series="Forecast") + 
+  autolayer(fitted(driftf), series="Fitted")
+```
+
+
+###Assessing model accuracy
+
+```{r, echo=FALSE}
+accuracy_f <- data.frame(as.data.frame(accuracy(mean_f)))
+accuracy_f[2,] <- as.data.frame(accuracy(naivef))
+accuracy_f[3,] <- as.data.frame(accuracy(snaivef))
+accuracy_f[4,] <- as.data.frame(accuracy(driftf))
+row.names(accuracy_f) <- c("Mean","Naive","Seasonal Naive", "Drift")
+kable(accuracy_f[-7], caption = "Forecast Accuracy Measures", digits = 4)
+```
+
+Both the drift and the naive method have the best performance in this group of forecasting methods, with the drift beating the naive method when it comes to its mean error and mean percentage error. However, the similarity of their values in the remaining error measures, the RMSE for example, indicate that either one will likely perform roughly the same. 
+
+###Cross-validated Accuracy Measures
+
+An interesting way to choose between different forecasts is to perform cross-validation and calculate their respective RMSE and MAE. This provides us an estimate of how performant each forecast is in actual forecasting future time series values for different forecast horizons by iteratively restricting the sample and comparing forecast values with actual values to generate forecast residuals. As such this error measure will prove useful to not only select the best forecast method from the same group, but across families of methods as well, e.g. exponential smoothing vs ARIMA models.
+
+```{r, echo=FALSE}
+meancv <- tsCV(indice,meanf,h=1)
+naivecv <- tsCV(indice,naive,h=1)
+snaivecv <- tsCV(indice,snaive,h=1)
+driftcv <- tsCV(indice,rwf, drift=TRUE,h=1)
+simplecv1 <- data.frame(c(sqrt(mean(meancv^2, na.rm=TRUE)),sqrt(mean(naivecv^2, na.rm=TRUE)),sqrt(mean(snaivecv^2, na.rm=TRUE)),sqrt(mean(driftcv^2, na.rm=TRUE))),
+                       c(mean(abs(meancv),na.rm=TRUE),mean(abs(naivecv),na.rm=TRUE),mean(abs(snaivecv),na.rm=TRUE),mean(abs(driftcv),na.rm=TRUE)))
+row.names(simplecv1) <- c("Mean","Naive","Seasonal Naive", "Drift")
+colnames(simplecv1) <- c("RMSE","MAE")
+kable(simplecv1, digits = 4, caption="Cross-validated RMSE and MAE for h=1")
+```
+
+```{r, echo=FALSE}
+meancv <- tsCV(indice,meanf,h=2)
+naivecv <- tsCV(indice,naive,h=2)
+snaivecv <- tsCV(indice,snaive,h=2)
+driftcv <- tsCV(indice,rwf, drift=TRUE,h=2)
+simplecv2 <- data.frame(c(sqrt(mean(meancv^2, na.rm=TRUE)),sqrt(mean(naivecv^2, na.rm=TRUE)),sqrt(mean(snaivecv^2, na.rm=TRUE)),sqrt(mean(driftcv^2, na.rm=TRUE))),
+                       c(mean(abs(meancv),na.rm=TRUE),mean(abs(naivecv),na.rm=TRUE),mean(abs(snaivecv),na.rm=TRUE),mean(abs(driftcv),na.rm=TRUE)))
+row.names(simplecv2) <- c("Mean","Naive","Seasonal Naive", "Drift")
+colnames(simplecv2) <- c("RMSE","MAE")
+kable(simplecv2,caption = "Cross-validated RMSE and MAE, h=2", digits = 4)
+```
+
+```{r, echo=FALSE}
+meancv <- tsCV(indice,meanf,h=3)
+naivecv <- tsCV(indice,naive,h=3)
+snaivecv <- tsCV(indice,snaive,h=3)
+driftcv <- tsCV(indice,rwf, drift=TRUE,h=3)
+simplecv3 <- data.frame(c(sqrt(mean(meancv^2, na.rm=TRUE)),sqrt(mean(naivecv^2, na.rm=TRUE)),sqrt(mean(snaivecv^2, na.rm=TRUE)),sqrt(mean(driftcv^2, na.rm=TRUE))),
+                       c(mean(abs(meancv),na.rm=TRUE),mean(abs(naivecv),na.rm=TRUE),mean(abs(snaivecv),na.rm=TRUE),mean(abs(driftcv),na.rm=TRUE)))
+row.names(simplecv3) <- c("Mean","Naive","Seasonal Naive", "Drift")
+colnames(simplecv3) <- c("RMSE","MAE")
+kable(simplecv3,caption = "Cross-validated RMSE and MAE, h=3", digits = 4)
+```
+
+##Exponential Smoothing Methods
+
+In this section we'll explore the use of exponential smoothing methods to forecast future values for this time series.
+
+```{r, echo=FALSE}
+indice %>% ets(model="ZNN")  %>% forecast(h=3) -> hwnn
+autoplot(indice, series="Data", main ="Simple Exponential Smoothing with Additive Errors") +
+  autolayer(fitted(hwnn), series="Fitted")+
+  autolayer(hwnn,series="Forecast")
+```
+
+```{r, echo=FALSE}
+indice %>% ets(model="ZAN")  %>% forecast(h=3) -> hwan
+autoplot(indice, series="Data", main ="Holt's Linear Method with Additive Errors") +
+  autolayer(fitted(hwan), series="Fitted")+
+  autolayer(hwan,series="Forecast")
+```
+
+```{r, echo=FALSE}
+indice %>% ets(model="ZAA")  %>% forecast(h=3) -> hwaa
+autoplot(indice, series="Data", main ="Additive Holt-Winter's Method with Additive Errors") +
+  autolayer(fitted(hwaa), series="Fitted")+
+  autolayer(hwaa,series="Forecast")
+```
+
+```{r, echo=FALSE}
+indice %>% ets(model="ZAM")  %>% forecast(h=3) -> hwam
+autoplot(indice, series="Data", main ="Multiplicative Holt-Winter's Method with Multiplicative Errors") +
+  autolayer(fitted(hwam), series="Fitted")+
+  autolayer(hwam,series="Forecast")
+```
+
+```{r, echo=FALSE}
+indice %>% ets(model="ZMN")  %>% forecast(h=3) -> hwmn
+autoplot(indice, series="Data", main ="Multiplicative Damped Trend Method with Multiplicative Error Terms") +
+  autolayer(fitted(hwmn), series="Fitted")+
+  autolayer(hwmn,series="Forecast")
+```
+
+Another possible way to forecast future values using exponential smoothing methods is to call the **ets()** function from the **forecast** R library developed by Rob Hyndman without passing on any model specifications. This instructs the function to go through the 30 possible ETS models and select the best based on their respective AIC and BIC values.
+
+```{r}
+indice %>% ets()  %>% forecast(h=3) -> ets1
+autoplot(indice, series="Data", main ="Linear Holt-Winters Model with Additive Errors") +
+  autolayer(fitted(ets1), series="Fitted")+
+  autolayer(ets1,series="Forecast")
+```
+
+This seems to suggest that a linear Holt-Winters model with additive errors is the best exponential smoothing method for this time series. 
+
+##Assessing forecast accuracy
+
+```{r, echo=FALSE}
+accuracy_ets <- data.frame()
+accuracy_ets <- rbind(accuracy_ets,accuracy(hwnn))
+accuracy_ets <- rbind(accuracy_ets,accuracy(hwan))
+accuracy_ets <- rbind(accuracy_ets,accuracy(hwaa))
+accuracy_ets <- rbind(accuracy_ets,accuracy(hwam))
+accuracy_ets <- rbind(accuracy_ets,accuracy(hwmn))
+row.names(accuracy_ets) <- c("Simple Exponential Smoothing","Holt's Linear Method","Holt-Winter's Method", "Holt-Winters Damped Method","Exponential Trend Method")
+kable(accuracy_ets[-7],caption = "Forecasst Accuracy Measures", digits = 4)
+```
+
+The usual forecast accuracy measures seem ambiguous in this situation. Some models perform better on some accuracy measures while being beaten by other models in other accuracy measures. 
+
+###Cross-validated Accuracy Measures
+
+Same as before, we'll estimate the cross-validated RMSE and MAE for the considered models for a forecast horizon of $h=1,2,3$ .
+
+```{r, echo=FALSE}
+hwnnf<- function(x,h){forecast(ets(x,model="ZNN"),h=h)}
+hwanf<- function(x,h){forecast(ets(x,model="ZAN"),h=h)}
+hwaaf<- function(x,h){forecast(ets(x,model="ZAA"),h=h)}
+hwamf<- function(x,h){forecast(ets(x,model="ZAM"),h=h)}
+hwmnf<- function(x,h){forecast(ets(x,model="ZMN"),h=h)}
+
+
+hwnncv <- tsCV(indice,hwnnf,h=1)
+hwancv <- tsCV(indice,hwanf,h=1)
+hwaacv <- tsCV(indice,hwaaf,h=1)
+hwamcv <- tsCV(indice,hwamf,h=1)
+hwmncv <- tsCV(indice,hwmnf,h=1)
+
+etscv <- data.frame(c(sqrt(mean(hwnncv^2, na.rm=TRUE)),sqrt(mean(hwancv^2, na.rm=TRUE)),sqrt(mean(hwaacv^2, na.rm=TRUE)),sqrt(mean(hwamcv^2, na.rm=TRUE)),sqrt(mean(hwmncv^2, na.rm=TRUE))),
+                       c(mean(abs(hwnncv),na.rm=TRUE),mean(abs(hwancv),na.rm=TRUE),mean(abs(hwaacv),na.rm=TRUE),mean(abs(hwamcv),na.rm=TRUE),mean(abs(hwmncv),na.rm=TRUE)))
+row.names(etscv) <- c("Simple Exponential Smoothing","Holt's Linear Method","Holt-Winter's Method", "Holt-Winters Damped Method","Exponential Trend Method")
+colnames(etscv) <- c("RMSE","MAE")
+kable(etscv, caption = "Cross-validated RMSE and MAE, h=1", digits = 4)
+```
+
+```{r, echo=FALSE}
+hwnncv <- tsCV(indice,hwnnf,h=2)
+hwancv <- tsCV(indice,hwanf,h=2)
+hwaacv <- tsCV(indice,hwaaf,h=2)
+hwamcv <- tsCV(indice,hwamf,h=2)
+hwmncv <- tsCV(indice,hwmnf,h=2)
+
+etscv <- data.frame(c(sqrt(mean(hwnncv^2, na.rm=TRUE)),sqrt(mean(hwancv^2, na.rm=TRUE)),sqrt(mean(hwaacv^2, na.rm=TRUE)),sqrt(mean(hwamcv^2, na.rm=TRUE)),sqrt(mean(hwmncv^2, na.rm=TRUE))),
+                       c(mean(abs(hwnncv),na.rm=TRUE),mean(abs(hwancv),na.rm=TRUE),mean(abs(hwaacv),na.rm=TRUE),mean(abs(hwamcv),na.rm=TRUE),mean(abs(hwmncv),na.rm=TRUE)))
+row.names(etscv) <- c("Simple Exponential Smoothing","Holt's Linear Method","Holt-Winter's Method", "Holt-Winters Damped Method","Exponential Trend Method")
+colnames(etscv) <- c("RMSE","MAE")
+kable(etscv, caption = "Cross-validated RMSE and MAE, h=2", digits = 4)
+```
+
+```{r, echo=FALSE}
+hwnncv <- tsCV(indice,hwnnf,h=3)
+hwancv <- tsCV(indice,hwanf,h=3)
+hwaacv <- tsCV(indice,hwaaf,h=3)
+hwamcv <- tsCV(indice,hwamf,h=3)
+hwmncv <- tsCV(indice,hwmnf,h=3)
+
+etscv <- data.frame(c(sqrt(mean(hwnncv^2, na.rm=TRUE)),sqrt(mean(hwancv^2, na.rm=TRUE)),sqrt(mean(hwaacv^2, na.rm=TRUE)),sqrt(mean(hwamcv^2, na.rm=TRUE)),sqrt(mean(hwmncv^2, na.rm=TRUE))),
+                       c(mean(abs(hwnncv),na.rm=TRUE),mean(abs(hwancv),na.rm=TRUE),mean(abs(hwaacv),na.rm=TRUE),mean(abs(hwamcv),na.rm=TRUE),mean(abs(hwmncv),na.rm=TRUE)))
+row.names(etscv) <- c("Simple Exponential Smoothing","Holt's Linear Method","Holt-Winter's Method", "Holt-Winters Damped Method","Exponential Trend Method")
+colnames(etscv) <- c("RMSE","MAE")
+kable(etscv, caption = "Cross-validated RMSE and MAE, h=3", digits = 4)
+```
+
+Additionally, We can compute the cross-validated RMSE and MAE for the 30 possible ETS models and choose the one that minimizes those values. For purposes of space and legibility we refrain from showing the final table and instead report which model got the lowest scores:
+
+```{r, echo=FALSE}
+etscv_f <- data.frame("Simple exponential smoothing with multiplicative errors",0.8433,0.5359,stringsAsFactors = FALSE)
+etscv_f <- rbind(etscv_f, c("Simple exponential smoothing with additive errors",1.3776,1.1327))
+etscv_f <- rbind(etscv_f,c("Multiplicative Holt-Winters' method with additive errors",1.652,1.336))
+colnames(etscv_f) <- c("Model","RMSE","MAE")
+rownames(etscv_f) <-c("h=1","h=2","h=3")
+kable(etscv_f)
+```
+
+```{r, include=FALSE}
+#letters <- c("N","A","M")
+#ets.cverrors <-data.frame("1","2","3", stringsAsFactors = FALSE)
+#for(i in letters){
+#  for(p in letters){
+#    for(l in letters){
+#      fct <- function(x,h){forecast(ets(x,model=paste(i,p,l,sep=""), damped = FALSE),h=h)}
+#      etscverror <- tsCV(indice,fct,h=3)
+#    ets.cverrors <- rbind(ets.cverrors,c(sqrt(mean(etscverror^2,na.rm=TRUE)),mean(abs(etscverror),na.rm = TRUE),paste(i,p,l,sep="")))
+#    }
+#  }
+#}
+```
+
+
+##ARIMA Models
+
+Before estimating an ARIMA model for the time series, it is perhaps useful to study the time series further so that the results we later get are in accordance to our understanding of the time series. We start by looking at the ACF plot for the original time series, which we can predict right away will have most of its values outside the significance limits as the series is not stationary. We'll then try to estimate the order of the differences we must do before we're able to estimate an ARIMA model, and then we'll proceed to estimate the ARIMA model proper.
+
+```{r, echo=FALSE}
+autoplot(acf(indice, plot = FALSE), main = "ACF")
+```
+
+As expected, most of its values are outside the significance levels, indicating non-stationarity. A more formal way to prove this is to use the *Augmented Dickey-Fuller (ADF)* test. For this test, the following regression model is estimated:
+
+$$y'_t = \phi y_{t-1} + \beta_1 y'_{t-1} + ... + \beta_k y'_{t-k}$$
+
+If the original series, $y_t$ is already stationary, then $\hat{\phi} <0$. If it needs differencing, then the coefficient should be approximately zero. The null-hypothesis for an ADF test is that the data are non-stationary, so large p-values are indicative of non-stationarity, and vice-versaa.
+
+```{r}
+adf.test(indice)
+```
+
+The large p-value does not allow us to reject the null-hypothesis, leading us to conclude that the time series is indeed non-stationary. An alternative method would be to compute the Kwiatkowski-Phillips-Schmidt-Shin (KPSS) test for the null hypothesis that the time series is level or trend stationary.
+
+```{r}
+kpss.test(indice)
+```
+
+The p-value is smaller than 0.05, which allows us to reject the null hypothesis at a 5% significance level that the time series is level stationary, as expected. A way to proceed would be to calculate the differences of the time series and see if we get a new time series that is indeed stationary. Fortunately, the **ndiffs()** function from the **forecast** package automates the estimation of the number of differences required to make a given time series stationary.
+
+```{r}
+ndiffs(indice,test = "kpss")
+```
+
+We now know the value of $d$ in our $ARIMA(p,d,q)(P,D,Q)_m$, which we assume to be a seasonal model given the evidence for seasonality explored above. We could hand-code the estimation of a number of ARIMA models and choose the one where the small-sample-size corrected version of the *Akaike Information Criterion*$(AIC_c)$ is minimized, but we can automate the process by using the **auto.arima()** function provided by the **forecast** package. 
+
+
+```{r, echo=FALSE}
+indice %>% auto.arima() %>% forecast(h=3) -> arima1
+autoplot(indice, series="Data") + 
+  autolayer(arima1, series="Forecast") + 
+  autolayer(fitted(arima1), series="Fitted")
+print(arima1$model)
+checkresiduals(arima1)
+```
+
+###Cross-validated Accuracy Measures
+
+Estimating the cross-validatied RMSE and MAE value sof a sample of ARIMA models can be done but it is computationally infeasable to explore every possible model since, for univariate seasonal models, that would imply estimating the cross-validation errors of $4^6$ models, or 4096 models. Instead what we choose to do is to use the fact that the $ARIMA(2,1,2)(0,0,1)$ seems to be the best model for this time series to restict the parameter space of our models such that $(p,d,q) \in \left [ 0,2 \right ]$ and $(P,D,Q) \in \left [ 0,1 \right ]$. This leaves us with $3^3 \times 2^3$ models, or 216 models, for which we will estimate their respective RMSE and MAE cross-validation values. We do not include the table with the entirety of the values for every model and instead report what model had the lowest scores for both error measures.
+
+```{r, echo=FALSE}
+#arima.cverrors2 <- data.frame()
+#for(p in 0:2){
+#  for(d in 0:2){
+#    for(q in 0:2){
+#      for(P in 0:1){
+#        for(D in 0:1){
+#          for(Q in 0:1){
+#            cvarima <- function(x,h){forecast(arima(x, order=c(p,d,q), seasonal=c(P,D,Q)),h=h)}
+#            cverror <- tsCV(indice,cvarima,h=3)
+#            arima.cverrors2 <- rbind(arima.cverrors2,c(sqrt(mean(cverror^2,na.rm=TRUE)),mean(abs(cverror),na.rm = TRUE),c(p,d,q,P,D,Q)))
+#          }
+#        }
+#      }
+#    }
+#  }
+#}
+```
+
+- The minimum cross-validated RMSE for a forecast horizon $h=1$ was $0.6886$ for the model $ARIMA(2,1,2)(1,0,0)$. The minimum cross-validated MAE for a forecast horizon $h=1$ was $0.5290$ for the model $ARIMA(2,0,0)(1,0,0)$.
+
+- For a forecast horizon $h=2$, the model $ARIMA(2,0,1)(1,0,0)$ performs the best, with a RMSE and a MAE of $1.1787$ and $0.9681$, respectively.
+
+- For a forecast horizon $h=3$, again the model $ARIMA(2,0,1)(1,0,0)$ performs the best, with a RMSE and a MAE of $1.5334$ and $1.2711$, respectively.
+
+#Conclusion
+
+Having estimated the cross-validated RMSE and MAE for all models considered we're in a position to tentatively select which forecast method will perhaps supply us with the 'best' forecast value for Portuguese index of output prices, for different forecast horizons
+
+## February
+
+There was no single model that obtained the lowest values for both RMSE and MAE. The lowest RMSE was obtained using the model $ARIMA(2,1,2)(1,0,0)$ while the minimum MAE was obtain using the model $ARIMA(2,0,0)(1,0,0)$. However, the drift method having obtained values for the RMSE and MAE of $0.7961$ and $0.6140$, respectively, pushes to consider it a viable forecasting method for so short a forecasting horizon.
+
+```{r, echo=FALSE}
+kable(as.data.frame(forecast(driftf,h=1)),digits=4,caption = "Forecast for February using the Drift Method")
+```
+
+
+## March and April
+
+The model $ARIMA(2,0,1)(1,0,0)$ performs the best, considering its values for the cross-validated *RMSE* and *MAE* for both a forecast horizon $h=2$ and $h=3$.
+
+```{r, echo=FALSE}
+marchapril <- as.data.frame(forecast(arima(indice,order=c(2,0,1),seasonal = c(1,0,0)),h=3))
+marchapril <- marchapril[-1,c(1,2,3,4,5)]
+kable(marchapril,digits=4,caption = "Forecast for March using ARIMA(2,0,1)(1,0,0)")
+```
+
+
+
+
